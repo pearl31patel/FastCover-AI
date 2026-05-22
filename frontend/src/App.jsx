@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { FileText, Download, Sparkles, UploadCloud } from "lucide-react";
 import logo from "./assets/transparent-logo.png";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "https://fastcover-ai.onrender.com";
 
 export default function App() {
   const [form, setForm] = useState({
