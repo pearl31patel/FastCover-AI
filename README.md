@@ -168,21 +168,6 @@ POST /contact
 
 ---
 
-# Screenshots
-
-Add screenshots here later.
-
----
-
 # Author
 
 ## Pearl Patel
-
-GitHub:
-https://github.com/pearl31patel
-
----
-
-# License
-
-This project is open-source and free to use.
