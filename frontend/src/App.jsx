@@ -73,7 +73,11 @@ export default function App() {
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", "FastCover_AI_Cover_Letter.pdf");
+      const fileName = `${form.company
+        .trim()
+        .toUpperCase()
+        .replaceAll(" ", "_")}_COVER_LETTER.pdf`;
+      link.setAttribute("download", fileName);
       document.body.appendChild(link);
       link.click();
       link.remove();
