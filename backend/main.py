@@ -208,21 +208,26 @@ def infer_focus_area(role: str, job_description: str) -> str:
     return "the responsibilities of this role"
 
 
-def clean_ai_output(text: str) -> str:
+def clean_ai_output(text: str, name: str = "") -> str:
     if not text:
         return ""
 
     text = text.strip()
 
+    # Remove markdown formatting
     text = re.sub(r"^```[a-zA-Z]*", "", text).strip()
     text = text.replace("```", "").strip()
 
+    # Remove placeholders
     text = re.sub(r"\[date\]", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\(date\)", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"date:\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[company address\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[address\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"company address", "", text, flags=re.IGNORECASE)
 
     lines = [line.rstrip() for line in text.splitlines()]
 
+    # Remove everything before Dear...
     dear_index = None
     for index, line in enumerate(lines):
         if re.match(r"^\s*Dear\b", line, re.IGNORECASE):
@@ -236,23 +241,68 @@ def clean_ai_output(text: str) -> str:
 
     for line in lines:
         stripped = line.strip()
+        lower = stripped.lower()
 
         if not stripped:
             cleaned_lines.append("")
             continue
 
-        if re.fullmatch(r"\[?date\]?", stripped, re.IGNORECASE):
+        # Remove placeholder lines
+        if re.fullmatch(r"\[.*?\]", stripped):
             continue
 
-        if "insert date" in stripped.lower():
+        # Remove email
+        if "@" in stripped and "." in stripped:
+            continue
+
+        # Remove phone number
+        if re.search(r"\b\d{3}[-.)\s]*\d{3}[-.\s]*\d{4}\b", stripped):
+            continue
+
+        # Remove date line like August 2, 2024
+        if re.match(
+            r"^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}$",
+            lower,
+        ):
+            continue
+
+        if lower in ["hiring manager", "company address", "address"]:
             continue
 
         cleaned_lines.append(line)
 
+    # Remove old closing and force Best regards
+    closing_index = None
+    for index, line in enumerate(cleaned_lines):
+        if re.match(
+            r"^\s*(sincerely|sincerely yours|regards|kind regards|best regards),?\s*$",
+            line,
+            re.IGNORECASE,
+        ):
+            closing_index = index
+            break
+
+    if closing_index is not None:
+        cleaned_lines = cleaned_lines[:closing_index]
+
+    # Remove extra blank lines at end
+    while cleaned_lines and not cleaned_lines[-1].strip():
+        cleaned_lines.pop()
+
+    # Remove duplicate name at end before adding closing
+    if name:
+        while cleaned_lines and cleaned_lines[-1].strip().lower() == name.lower():
+            cleaned_lines.pop()
+
     text = "\n".join(cleaned_lines)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
-    return text
+    if name:
+        text = text.rstrip() + f"\n\nBest regards,\n{name}"
+    else:
+        text = text.rstrip() + "\n\nBest regards,"
+
+    return text.strip()
 
 
 def is_bad_output(text: str) -> bool:
@@ -265,6 +315,7 @@ def is_bad_output(text: str) -> bool:
         "i believe my background matches the needs of this role",
         "attention to detail, communication, organization, and the ability to support business needs",
         "[date]",
+        "[company address]",
         "insert date",
         "your generated cover letter will appear here",
     ]
@@ -273,6 +324,12 @@ def is_bad_output(text: str) -> bool:
         return True
 
     if re.search(r"\[[^\]]+\]", text):
+        return True
+
+    if not re.match(r"^Dear\b", text.strip(), re.IGNORECASE):
+        return True
+
+    if "best regards" not in lower:
         return True
 
     if len(text.split()) < 90:
@@ -318,7 +375,7 @@ Based on the job description, I understand that this role needs someone who can 
 
 Thank you for your time and consideration. I would appreciate the opportunity to discuss how my experience can support the {role} position at {company}.
 
-Sincerely,
+Best regards,
 {name}""".strip()
 
 
@@ -335,11 +392,28 @@ You are an expert cover letter writer.
 Write a personalized cover letter using ONLY the resume and job description.
 
 Strict rules:
-- Return only the final cover letter.
+- Return only the final cover letter body.
 - Start directly with: Dear Hiring Manager,
-- Do NOT include candidate name, email, phone number, address, company address, or date at the top.
+- Do NOT include candidate name, email, phone number, address, date, hiring manager block, company name block, or company address.
 - Do NOT write [Date].
+- Do NOT write [Company Address].
 - Do NOT use any placeholders.
+- Do NOT create a traditional letter header.
+- The format must be exactly:
+
+Dear Hiring Manager,
+
+Paragraph 1
+
+Paragraph 2
+
+Paragraph 3
+
+Best regards,
+{name}
+
+- Do NOT use "Sincerely".
+- Use "Best regards" only.
 - Do NOT write generic content.
 - Do NOT say: "I believe my background matches the needs of this role."
 - Do NOT say: "attention to detail, communication, organization, and the ability to support business needs."
@@ -349,9 +423,6 @@ Strict rules:
 - Keep it professional, natural, and concise.
 - Keep it around 180 to 240 words.
 - Use simple grammar.
-- End with:
-Sincerely,
-{name}
 
 Candidate Name:
 {name}
@@ -379,7 +450,7 @@ def build_retry_prompt(
     bad_output: str,
 ) -> str:
     return f"""
-The previous cover letter was not acceptable because it was generic or included placeholders/header formatting.
+The previous cover letter was not acceptable because it was generic or included placeholder/header formatting.
 
 Rewrite it correctly.
 
@@ -389,12 +460,20 @@ Rules:
 - No company address.
 - No date.
 - No [Date].
+- No [Company Address].
 - No placeholders.
+- Do not use Sincerely.
+- Use Best regards only.
 - Make it specific to {company} and the {role} role.
 - Use resume evidence only.
 - Keep it 180 to 240 words.
-- End with:
-Sincerely,
+- Final format must be:
+
+Dear Hiring Manager,
+
+Main content
+
+Best regards,
 {name}
 
 Bad previous output:
@@ -461,7 +540,7 @@ def generate_cover_letter(
                 print(f"Calling Gemini model: {model_name}")
 
                 first_output = call_gemini(model_name, main_prompt)
-                cleaned_output = clean_ai_output(first_output)
+                cleaned_output = clean_ai_output(first_output, name)
 
                 if not is_bad_output(cleaned_output):
                     return cleaned_output
@@ -478,7 +557,7 @@ def generate_cover_letter(
                 )
 
                 second_output = call_gemini(model_name, retry_prompt)
-                cleaned_retry_output = clean_ai_output(second_output)
+                cleaned_retry_output = clean_ai_output(second_output, name)
 
                 if not is_bad_output(cleaned_retry_output):
                     return cleaned_retry_output
